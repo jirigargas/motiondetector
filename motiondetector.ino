@@ -22,6 +22,7 @@ MPU6050 mpu;
 
 #define INTERRUPT_PIN 2 // use pin 2 on Arduino Uno & most boards
 #define LED_PIN 13      // (Arduino is 13, Teensy is 11, Teensy++ is 6)
+#define BUZZER_PIN 9    // use pin 9 on Arduino Uno for buzzer
 bool blinkState = false;
 
 // MPU control/status vars
@@ -134,6 +135,19 @@ void setup()
 
     // configure LED for output
     pinMode(LED_PIN, OUTPUT);
+
+    //configure buzzer for output
+    pinMode(BUZZER_PIN, OUTPUT);
+}
+
+// ================================================================
+// ===                      BUZZER                              ===
+// ================================================================
+
+void playSound(int period) {
+    tone(BUZZER_PIN, 2000); // Send 1KHz sound signal...
+    delay(period);        // ...for period in ms
+    noTone(BUZZER_PIN);     // Stop sound...
 }
 
 // ================================================================
@@ -152,6 +166,7 @@ int ax_offset, ay_offset, az_offset, gx_offset, gy_offset, gz_offset;
 
 void calibrateSensor()
 {
+    playSound(250);
     // reset offsets
     mpu.setXAccelOffset(0);
     mpu.setYAccelOffset(0);
@@ -211,6 +226,7 @@ void calibrateSensor()
         mpu.setZGyroOffset(gz_offset);
         Serial.println("\nData is printed as: acelX acelY acelZ giroX giroY giroZ");
     }
+    playSound(500);
 }
 
 void meansensors()
