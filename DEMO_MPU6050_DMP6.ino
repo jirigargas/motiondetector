@@ -219,7 +219,7 @@ void setup() {
         // set our DMP Ready flag so the main loop() function knows it's okay to use it
         Serial.println(F("DMP ready! Waiting for first interrupt..."));
         dmpReady = true;
- 
+
         // get expected DMP packet size for later comparison
         packetSize = mpu.dmpGetFIFOPacketSize();
     } else {
@@ -315,12 +315,19 @@ void loop() {
             mpu.dmpGetQuaternion(&q, fifoBuffer);
             mpu.dmpGetGravity(&gravity, &q);
             mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-            Serial.print("ypr\t");
-            Serial.print(ypr[0] * 180/M_PI);
-            Serial.print("\t");
-            Serial.print(ypr[1] * 180/M_PI);
-            Serial.print("\t");
-            Serial.println(ypr[2] * 180/M_PI);
+
+            Serial.print("CMP:");
+            Serial.print(0, 2);
+            Serial.print(":");
+            Serial.print(0, 2);
+            Serial.print(":");
+            Serial.println(0, 2);
+            Serial.print("DMP:");
+            Serial.print(ypr[2] * 180/M_PI, 2);
+            Serial.print(":");
+            Serial.print(-ypr[1] * 180/M_PI, 2);
+            Serial.print(":");
+            Serial.println(ypr[0] * 180/M_PI, 2);
         #endif
 
         #ifdef OUTPUT_READABLE_REALACCEL
