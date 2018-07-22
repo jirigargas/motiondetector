@@ -7,6 +7,11 @@
 #include "Wire.h"
 #endif
 
+int maxDeviation = 10; // when deviation bigger then X sound alarm
+bool isAlarmOn = false;
+
+#pragma region variables
+
 // class default I2C address is 0x68 specific I2C addresses may be passed as a parameter here
 // AD0 low = 0x68 (default for SparkFun breakout and InvenSense evaluation board)
 // AD0 high = 0x69
@@ -45,19 +50,26 @@ float ypr[3];        // [yaw, pitch, roll]   yaw/pitch/roll container and gravit
 // packet structure for InvenSense teapot demo
 uint8_t teapotPacket[14] = {'$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n'};
 
-// ================================================================
-// ===               INTERRUPT DETECTION ROUTINE                ===
-// ================================================================
+//Change this 3 variables if you want to fine tune the skecth to your needs.
+int buffersize = 1000; //Amount of readings used to average, make it higher to get more precision but sketch will be slower  (default:1000)
+int acel_deadzone = 8; //Acelerometer error allowed, make it lower to get more precision, but sketch may not converge  (default:8)
+int giro_deadzone = 1; //Giro error allowed, make it lower to get more precision, but sketch may not converge  (default:1)
 
+int16_t ax, ay, az, gx, gy, gz;
+
+int mean_ax, mean_ay, mean_az, mean_gx, mean_gy, mean_gz, state = 0;
+int ax_offset, ay_offset, az_offset, gx_offset, gy_offset, gz_offset;
+
+#pragma endregion
+
+/**
+ * INTERRUPT DETECTION ROUTINE
+ * */
 volatile bool mpuInterrupt = false; // indicates whether MPU interrupt pin has gone high
 void dmpDataReady()
 {
     mpuInterrupt = true;
 }
-
-// ================================================================
-// ===                      INITIAL SETUP                       ===
-// ================================================================
 
 void setup()
 {
@@ -69,19 +81,28 @@ void setup()
     Fastwire::setup(400, true);
 #endif
 
-    // initialize serial communication
-    // (115200 chosen because it is required for Teapot Demo output, but it's
-    // really up to you depending on your project)
-    Serial.begin(115200);
-    while (!Serial)
-        ; // wait for Leonardo enumeration, others continue immediately
-
     // NOTE: 8MHz or slower host processors, like the Teensy @ 3.3v or Ardunio
     // Pro Mini running at 3.3v, cannot handle this baud rate reliably due to
     // the baud timing being too misaligned with processor ticks. You must use
     // 38400 or slower in these cases, or use some kind of external separate
     // crystal solution for the UART timer.
+    Serial.begin(115200);
 
+    // wait for Leonardo enumeration, others continue immediately
+    while (!Serial)
+    {
+    }
+
+    setupMPU6050();
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+}
+
+/**
+ * Gyroscope setup
+ * */
+void setupMPU6050()
+{
     // initialize device
     Serial.println(F("Initializing I2C devices..."));
     mpu.initialize();
@@ -131,40 +152,30 @@ void setup()
         Serial.println(F(")"));
     }
 
-    calibrateSensor();
-
-    // configure LED for output
-    pinMode(LED_PIN, OUTPUT);
-
-    //configure buzzer for output
-    pinMode(BUZZER_PIN, OUTPUT);
+    setGyroscopeOffset();
 }
 
-// ================================================================
-// ===                      BUZZER                              ===
-// ================================================================
-
-void playSound(int period) {
-    tone(BUZZER_PIN, 2000); // Send 1KHz sound signal...
-    delay(period);        // ...for period in ms
+void playSound(int period)
+{
+    tone(BUZZER_PIN, 2500); // Send 1KHz sound signal...
+    delay(period);          // ...for period in ms
     noTone(BUZZER_PIN);     // Stop sound...
 }
 
-// ================================================================
-// ===                   OFFSET CALIBRATION                     ===
-// ================================================================
+void alarm(bool raise)
+{
+    isAlarmOn = raise;
+    if (raise)
+    {
+        tone(BUZZER_PIN, 2500);
+    }
+    else
+    {
+        noTone(BUZZER_PIN);
+    }
+}
 
-//Change this 3 variables if you want to fine tune the skecth to your needs.
-int buffersize = 1000; //Amount of readings used to average, make it higher to get more precision but sketch will be slower  (default:1000)
-int acel_deadzone = 8; //Acelerometer error allowed, make it lower to get more precision, but sketch may not converge  (default:8)
-int giro_deadzone = 1; //Giro error allowed, make it lower to get more precision, but sketch may not converge  (default:1)
-
-int16_t ax, ay, az, gx, gy, gz;
-
-int mean_ax, mean_ay, mean_az, mean_gx, mean_gy, mean_gz, state = 0;
-int ax_offset, ay_offset, az_offset, gx_offset, gy_offset, gz_offset;
-
-void calibrateSensor()
+void setGyroscopeOffset()
 {
     playSound(250);
     // reset offsets
@@ -261,6 +272,9 @@ void meansensors()
     }
 }
 
+/**
+ * Calibrates gyroscope offset
+ * */
 void calibration()
 {
     ax_offset = -mean_ax / 8;
@@ -315,10 +329,6 @@ void calibration()
     }
 }
 
-// ================================================================
-// ===                    MAIN PROGRAM LOOP                     ===
-// ================================================================
-
 void loop()
 {
     // if programming failed, don't try to do anything
@@ -329,15 +339,10 @@ void loop()
     while (!mpuInterrupt && fifoCount < packetSize)
     {
         // other program behavior stuff here
-        // .
-        // .
-        // .
+
         // if you are really paranoid you can frequently test in between other
         // stuff to see if mpuInterrupt is true, and if so, "break;" from the
         // while() loop to immediately process the MPU data
-        // .
-        // .
-        // .
     }
 
     // reset interrupt flag and get INT_STATUS byte
@@ -374,6 +379,10 @@ void loop()
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
+        float dmpX = ypr[2] * 180 / M_PI;
+        float dmpY = -ypr[1] * 180 / M_PI;
+        float dmpZ = ypr[0] * 180 / M_PI;
+
         Serial.print("CMP:");
         Serial.print(0, 2);
         Serial.print(":");
@@ -381,11 +390,26 @@ void loop()
         Serial.print(":");
         Serial.println(0, 2);
         Serial.print("DMP:");
-        Serial.print(ypr[2] * 180 / M_PI, 2);
+        Serial.print(dmpX, 2);
         Serial.print(":");
-        Serial.print(-ypr[1] * 180 / M_PI, 2);
+        Serial.print(dmpY, 2);
         Serial.print(":");
-        Serial.println(ypr[0] * 180 / M_PI, 2);
+        Serial.println(dmpZ, 2);
+
+        if ((abs(dmpX) > maxDeviation || abs(dmpY) > maxDeviation))
+        {
+            if (!isAlarmOn)
+            {
+                alarm(true);
+            }
+        }
+        else
+        {
+            if (isAlarmOn)
+            {
+                alarm(false);
+            }
+        }
 
         // blink LED to indicate activity
         blinkState = !blinkState;
