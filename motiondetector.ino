@@ -177,24 +177,24 @@ void calibrateSensor()
 
     if (state == 0)
     {
-        Serial.println("\nReading sensors for first time...");
+        Serial.println("Reading sensors for first time...");
         meansensors();
         state++;
     }
 
     if (state == 1)
     {
-        Serial.println("\nCalculating offsets...");
+        Serial.println("Calculating offsets...");
         calibration();
 
-        Serial.println("\nFINISHED!");
+        Serial.println("Offsets calculated");
         state++;
     }
 
     if (state == 2)
     {
         meansensors();
-        Serial.print("\nSensor readings with offsets:\t");
+        Serial.print("Sensor readings with offsets:\t");
         Serial.print(mean_ax);
         Serial.print("\t");
         Serial.print(mean_ay);
@@ -224,7 +224,7 @@ void calibrateSensor()
         Serial.print("\t");
         Serial.println(gz_offset);
         mpu.setZGyroOffset(gz_offset);
-        Serial.println("\nData is printed as: acelX acelY acelZ giroX giroY giroZ");
+        Serial.println("Data is printed as: acelX acelY acelZ giroX giroY giroZ");
     }
     playSound(500);
 }
