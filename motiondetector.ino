@@ -415,4 +415,7 @@ void loop()
         blinkState = !blinkState;
         digitalWrite(LED_PIN, blinkState);
     }
+
+    // Delay so we don't swamp the serial port
+    delay(5);
 }
