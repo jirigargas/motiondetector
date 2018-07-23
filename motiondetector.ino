@@ -215,57 +215,47 @@ void setGyroscopeOffset()
     mpu.setYGyroOffset(0);
     mpu.setZGyroOffset(0);
 
-    if (state == 0)
-    {
-        Serial.println("Reading sensors for first time...");
-        meansensors();
-        state++;
-    }
+    Serial.println("Reading sensors for first time...");
+    meansensors();
 
-    if (state == 1)
-    {
-        Serial.println("Calculating offsets...");
-        calibration();
+    Serial.println("Calculating offsets...");
+    calibration();
 
-        Serial.println("Offsets calculated");
-        state++;
-    }
+    Serial.println("Offsets calculated");
 
-    if (state == 2)
-    {
-        meansensors();
-        Serial.print("Sensor readings with offsets:\t");
-        Serial.print(mean_ax);
-        Serial.print("\t");
-        Serial.print(mean_ay);
-        Serial.print("\t");
-        Serial.print(mean_az);
-        Serial.print("\t");
-        Serial.print(mean_gx);
-        Serial.print("\t");
-        Serial.print(mean_gy);
-        Serial.print("\t");
-        Serial.println(mean_gz);
-        Serial.print("Your offsets:\t");
-        Serial.print(ax_offset);
-        mpu.setXAccelOffset(ax_offset);
-        Serial.print("\t");
-        Serial.print(ay_offset);
-        mpu.setYAccelOffset(ay_offset);
-        Serial.print("\t");
-        Serial.print(az_offset);
-        mpu.setZAccelOffset(az_offset);
-        Serial.print("\t");
-        Serial.print(gx_offset);
-        mpu.setXGyroOffset(gx_offset);
-        Serial.print("\t");
-        Serial.print(gy_offset);
-        mpu.setYGyroOffset(gy_offset);
-        Serial.print("\t");
-        Serial.println(gz_offset);
-        mpu.setZGyroOffset(gz_offset);
-        Serial.println("Data is printed as: acelX acelY acelZ giroX giroY giroZ");
-    }
+    meansensors();
+    Serial.print("Sensor readings with offsets:\t");
+    Serial.print(mean_ax);
+    Serial.print("\t");
+    Serial.print(mean_ay);
+    Serial.print("\t");
+    Serial.print(mean_az);
+    Serial.print("\t");
+    Serial.print(mean_gx);
+    Serial.print("\t");
+    Serial.print(mean_gy);
+    Serial.print("\t");
+    Serial.println(mean_gz);
+    Serial.print("Your offsets:\t");
+    Serial.print(ax_offset);
+    mpu.setXAccelOffset(ax_offset);
+    Serial.print("\t");
+    Serial.print(ay_offset);
+    mpu.setYAccelOffset(ay_offset);
+    Serial.print("\t");
+    Serial.print(az_offset);
+    mpu.setZAccelOffset(az_offset);
+    Serial.print("\t");
+    Serial.print(gx_offset);
+    mpu.setXGyroOffset(gx_offset);
+    Serial.print("\t");
+    Serial.print(gy_offset);
+    mpu.setYGyroOffset(gy_offset);
+    Serial.print("\t");
+    Serial.println(gz_offset);
+    mpu.setZGyroOffset(gz_offset);
+    Serial.println("Data is printed as: acelX acelY acelZ giroX giroY giroZ");
+
     playSound(500);
 }
 
@@ -432,6 +422,21 @@ void loop()
     Serial.print(F(","));
     Serial.print(angle_z, 2);
     Serial.println(F(""));
+
+    if ((abs(angle_x) > maxDeviation || abs(angle_y) > maxDeviation))
+    {
+        if (!isAlarmOn)
+        {
+            alarm(true);
+        }
+    }
+    else
+    {
+        if (isAlarmOn)
+        {
+            alarm(false);
+        }
+    }
 
     // Delay so we don't swamp the serial port
     delay(5);
