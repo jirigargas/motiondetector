@@ -60,6 +60,35 @@ int16_t ax, ay, az, gx, gy, gz;
 int mean_ax, mean_ay, mean_az, mean_gx, mean_gy, mean_gz, state = 0;
 int ax_offset, ay_offset, az_offset, gx_offset, gy_offset, gz_offset;
 
+// Use the following global variables and access functions to help store the overall
+// rotation angle of the sensor
+unsigned long last_read_time;
+float last_x_angle; // These are the filtered angles
+float last_y_angle;
+float last_z_angle;
+float last_gyro_x_angle; // Store the gyro angles to compare drift
+float last_gyro_y_angle;
+float last_gyro_z_angle;
+
+void set_last_read_angle_data(unsigned long time, float x, float y, float z, float x_gyro, float y_gyro, float z_gyro)
+{
+    last_read_time = time;
+    last_x_angle = x;
+    last_y_angle = y;
+    last_z_angle = z;
+    last_gyro_x_angle = x_gyro;
+    last_gyro_y_angle = y_gyro;
+    last_gyro_z_angle = z_gyro;
+}
+
+inline unsigned long get_last_time() { return last_read_time; }
+inline float get_last_x_angle() { return last_x_angle; }
+inline float get_last_y_angle() { return last_y_angle; }
+inline float get_last_z_angle() { return last_z_angle; }
+inline float get_last_gyro_x_angle() { return last_gyro_x_angle; }
+inline float get_last_gyro_y_angle() { return last_gyro_y_angle; }
+inline float get_last_gyro_z_angle() { return last_gyro_z_angle; }
+
 #pragma endregion
 
 /**
@@ -331,90 +360,78 @@ void calibration()
 
 void loop()
 {
-    // if programming failed, don't try to do anything
-    if (!dmpReady)
-        return;
+    double dT;
 
-    // wait for MPU interrupt or extra packet(s) available
-    while (!mpuInterrupt && fifoCount < packetSize)
-    {
-        // other program behavior stuff here
+    // Read the raw values.
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
-        // if you are really paranoid you can frequently test in between other
-        // stuff to see if mpuInterrupt is true, and if so, "break;" from the
-        // while() loop to immediately process the MPU data
-    }
+    // Get the time of reading for rotation computations
+    unsigned long t_now = millis();
 
-    // reset interrupt flag and get INT_STATUS byte
-    mpuInterrupt = false;
-    mpuIntStatus = mpu.getIntStatus();
+    // Convert gyro values to degrees/sec
+    float FS_SEL = 131;
 
-    // get current FIFO count
-    fifoCount = mpu.getFIFOCount();
+    float gyro_x = gx / FS_SEL;
+    float gyro_y = gy / FS_SEL;
+    float gyro_z = gz / FS_SEL;
 
-    // check for overflow (this should never happen unless our code is too inefficient)
-    if ((mpuIntStatus & 0x10) || fifoCount == 1024)
-    {
-        // reset so we can continue cleanly
-        mpu.resetFIFO();
-        Serial.println(F("FIFO overflow!"));
+    // Get raw acceleration values
+    //float G_CONVERT = 16384;
+    float accel_x = ax;
+    float accel_y = ay;
+    float accel_z = az;
 
-        // otherwise, check for DMP data ready interrupt (this should happen frequently)
-    }
-    else if (mpuIntStatus & 0x02)
-    {
-        // wait for correct available data length, should be a VERY short wait
-        while (fifoCount < packetSize)
-            fifoCount = mpu.getFIFOCount();
+    // Get angle values from accelerometer
+    float RADIANS_TO_DEGREES = 180 / 3.14159;
+    // float accel_vector_length = sqrt(pow(accel_x,2) + pow(accel_y,2) + pow(accel_z,2));
+    float accel_angle_y = atan(-1 * accel_x / sqrt(pow(accel_y, 2) + pow(accel_z, 2))) * RADIANS_TO_DEGREES;
+    float accel_angle_x = atan(accel_y / sqrt(pow(accel_x, 2) + pow(accel_z, 2))) * RADIANS_TO_DEGREES;
 
-        // read a packet from FIFO
-        mpu.getFIFOBytes(fifoBuffer, packetSize);
+    float accel_angle_z = 0;
 
-        // track FIFO count here in case there is > 1 packet available
-        // (this lets us immediately read more without waiting for an interrupt)
-        fifoCount -= packetSize;
+    // Compute the (filtered) gyro angles
+    float dt = (t_now - get_last_time()) / 1000.0;
+    float gyro_angle_x = gyro_x * dt + get_last_x_angle();
+    float gyro_angle_y = gyro_y * dt + get_last_y_angle();
+    float gyro_angle_z = gyro_z * dt + get_last_z_angle();
 
-        // display Euler angles in degrees
-        mpu.dmpGetQuaternion(&q, fifoBuffer);
-        mpu.dmpGetGravity(&gravity, &q);
-        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+    // Compute the drifting gyro angles
+    float unfiltered_gyro_angle_x = gyro_x * dt + get_last_gyro_x_angle();
+    float unfiltered_gyro_angle_y = gyro_y * dt + get_last_gyro_y_angle();
+    float unfiltered_gyro_angle_z = gyro_z * dt + get_last_gyro_z_angle();
 
-        float dmpX = ypr[2] * 180 / M_PI;
-        float dmpY = -ypr[1] * 180 / M_PI;
-        float dmpZ = ypr[0] * 180 / M_PI;
+    // Apply the complementary filter to figure out the change in angle - choice of alpha is
+    // estimated now.  Alpha depends on the sampling rate...
+    float alpha = 0.96;
+    float angle_x = alpha * gyro_angle_x + (1.0 - alpha) * accel_angle_x;
+    float angle_y = alpha * gyro_angle_y + (1.0 - alpha) * accel_angle_y;
+    float angle_z = gyro_angle_z; //Accelerometer doesn't give z-angle
 
-        Serial.print("CMP:");
-        Serial.print(0, 2);
-        Serial.print(":");
-        Serial.print(0, 2);
-        Serial.print(":");
-        Serial.println(0, 2);
-        Serial.print("DMP:");
-        Serial.print(dmpX, 2);
-        Serial.print(":");
-        Serial.print(dmpY, 2);
-        Serial.print(":");
-        Serial.println(dmpZ, 2);
+    // Update the saved data with the latest values
+    set_last_read_angle_data(t_now, angle_x, angle_y, angle_z, unfiltered_gyro_angle_x, unfiltered_gyro_angle_y, unfiltered_gyro_angle_z);
 
-        if ((abs(dmpX) > maxDeviation || abs(dmpY) > maxDeviation))
-        {
-            if (!isAlarmOn)
-            {
-                alarm(true);
-            }
-        }
-        else
-        {
-            if (isAlarmOn)
-            {
-                alarm(false);
-            }
-        }
-
-        // blink LED to indicate activity
-        blinkState = !blinkState;
-        digitalWrite(LED_PIN, blinkState);
-    }
+    // Send the data to the serial port
+    Serial.print(F("DEL:")); //Delta T
+    Serial.print(dt, DEC);
+    Serial.print(F("#ACC:")); //Accelerometer angle
+    Serial.print(accel_angle_x, 2);
+    Serial.print(F(","));
+    Serial.print(accel_angle_y, 2);
+    Serial.print(F(","));
+    Serial.print(accel_angle_z, 2);
+    Serial.print(F("#GYR:"));
+    Serial.print(unfiltered_gyro_angle_x, 2); //Gyroscope angle
+    Serial.print(F(","));
+    Serial.print(unfiltered_gyro_angle_y, 2);
+    Serial.print(F(","));
+    Serial.print(unfiltered_gyro_angle_z, 2);
+    Serial.print(F("#FIL:")); //Filtered angle
+    Serial.print(angle_x, 2);
+    Serial.print(F(","));
+    Serial.print(angle_y, 2);
+    Serial.print(F(","));
+    Serial.print(angle_z, 2);
+    Serial.println(F(""));
 
     // Delay so we don't swamp the serial port
     delay(5);
