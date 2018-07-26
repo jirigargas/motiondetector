@@ -1,5 +1,6 @@
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
+#include "DS3231.h"
 
 // Arduino Wire library is required if I2Cdev I2CDEV_ARDUINO_WIRE implementation
 // is used in I2Cdev.h
@@ -17,6 +18,8 @@ bool isAlarmOn = false;
 // AD0 high = 0x69
 //MPU6050 mpu;
 MPU6050 mpu(0x69); // <-- use for AD0 high
+
+DS3231 rtc(SDA, SCL);
 
 /* =========================================================================
    NOTE: In addition to connection 3.3v, GND, SDA, and SCL, this sketch
@@ -105,7 +108,7 @@ void setup()
 // join I2C bus (I2Cdev library doesn't do this automatically)
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
     Wire.begin();
-    Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
+   // Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
 #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
     Fastwire::setup(400, true);
 #endif
@@ -116,7 +119,7 @@ void setup()
     // 38400 or slower in these cases, or use some kind of external separate
     // crystal solution for the UART timer.
     Serial.begin(115200);
-
+    rtc.begin();
     // wait for Leonardo enumeration, others continue immediately
     while (!Serial)
     {
@@ -350,6 +353,12 @@ void calibration()
 
 void loop()
 {
+    // Send date
+    Serial.print(rtc.getDateStr());
+    Serial.print(" -- ");
+    // Send time
+    Serial.println(rtc.getTimeStr());
+
     double dT;
 
     // Read the raw values.
