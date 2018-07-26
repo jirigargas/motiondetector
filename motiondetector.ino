@@ -1,6 +1,8 @@
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "DS3231.h"
+#include "SPI.h"
+#include "SD.h"
 
 // Arduino Wire library is required if I2Cdev I2CDEV_ARDUINO_WIRE implementation
 // is used in I2Cdev.h
@@ -21,6 +23,8 @@ MPU6050 mpu(0x69); // <-- use for AD0 high
 
 DS3231 rtc(SDA, SCL);
 
+File logFile;
+
 /* =========================================================================
    NOTE: In addition to connection 3.3v, GND, SDA, and SCL, this sketch
    depends on the MPU-6050's INT pin being connected to the Arduino's
@@ -31,6 +35,8 @@ DS3231 rtc(SDA, SCL);
 #define INTERRUPT_PIN 2 // use pin 2 on Arduino Uno & most boards
 #define LED_PIN 13      // (Arduino is 13, Teensy is 11, Teensy++ is 6)
 #define BUZZER_PIN 9    // use pin 9 on Arduino Uno for buzzer
+#define CS_PIN 4        // use pin 12 as CS pin for SDCard
+
 bool blinkState = false;
 
 // MPU control/status vars
@@ -108,7 +114,7 @@ void setup()
 // join I2C bus (I2Cdev library doesn't do this automatically)
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
     Wire.begin();
-   // Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
+    // Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
 #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
     Fastwire::setup(400, true);
 #endif
@@ -126,8 +132,42 @@ void setup()
     }
 
     setupMPU6050();
+    setupSDCard();
     pinMode(LED_PIN, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
+}
+
+void setupSDCard()
+{
+    if (SD.begin(CS_PIN))
+    {
+        Serial.println("SD card is ready");
+    }
+    else
+    {
+        Serial.println("Unable to connect SD card");
+    }
+}
+
+void writeToLog(String datePart, String timePart, float x, float y, float z)
+{
+    logFile = SD.open("log.txt", FILE_WRITE);
+    if (logFile)
+    {
+        logFile.print(datePart);
+        logFile.print(" ");
+        logFile.print(timePart);
+        logFile.print(",");
+        logFile.print(y);
+        logFile.print(",");
+        logFile.println(z);
+        logFile.close();
+    }
+    // if the file didn't open, print an error:
+    else
+    {
+        Serial.println("Error opening log.txt");
+    }
 }
 
 /**
@@ -353,12 +393,6 @@ void calibration()
 
 void loop()
 {
-    // Send date
-    Serial.print(rtc.getDateStr());
-    Serial.print(" -- ");
-    // Send time
-    Serial.println(rtc.getTimeStr());
-
     double dT;
 
     // Read the raw values.
@@ -431,6 +465,8 @@ void loop()
     Serial.print(F(","));
     Serial.print(angle_z, 2);
     Serial.println(F(""));
+
+    writeToLog(rtc.getDateStr(), rtc.getTimeStr(), angle_x, angle_y, angle_z);
 
     if ((abs(angle_x) > maxDeviation || abs(angle_y) > maxDeviation))
     {
