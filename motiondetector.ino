@@ -169,7 +169,12 @@ void setGyroscopeOffset()
     meansensors();
 
     Serial.println("Offsets calculated");
-
+    Serial.print("XAccelOffset ");
+    Serial.print(ax_offset);
+    Serial.print("YAccelOffset ");
+    Serial.print(ay_offset);
+    Serial.print("ZAccelOffset ");
+    Serial.print(az_offset);
     mpu.setXAccelOffset(ax_offset);
     mpu.setYAccelOffset(ay_offset);
     mpu.setZAccelOffset(az_offset);
