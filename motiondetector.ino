@@ -10,56 +10,17 @@
 #include "Wire.h"
 #endif
 
+#define BUZZER_PIN 9 // use pin 9 on Arduino Uno for buzzer
+#define CS_PIN 4     // use pin 12 as CS pin for SDCard
+
 int maxDeviation = 10; // when deviation bigger then X sound alarm
 bool isAlarmOn = false;
 
-#pragma region variables
-
-// class default I2C address is 0x68 specific I2C addresses may be passed as a parameter here
-// AD0 low = 0x68 (default for SparkFun breakout and InvenSense evaluation board)
-// AD0 high = 0x69
-//MPU6050 mpu;
-MPU6050 mpu(0x69); // <-- use for AD0 high
-
+MPU6050 mpu(0x69); // AD0 high = 0x69, AD0 low = 0x68
 DS3231 rtc(SDA, SCL);
-
 File logFile;
 
-/* =========================================================================
-   NOTE: In addition to connection 3.3v, GND, SDA, and SCL, this sketch
-   depends on the MPU-6050's INT pin being connected to the Arduino's
-   external interrupt #0 pin. On the Arduino Uno and Mega 2560, this is
-   digital I/O pin 2.
-   ========================================================================= */
-
-#define INTERRUPT_PIN 2 // use pin 2 on Arduino Uno & most boards
-#define LED_PIN 13      // (Arduino is 13, Teensy is 11, Teensy++ is 6)
-#define BUZZER_PIN 9    // use pin 9 on Arduino Uno for buzzer
-#define CS_PIN 4        // use pin 12 as CS pin for SDCard
-
-bool blinkState = false;
-
-// MPU control/status vars
-bool dmpReady = false;  // set true if DMP init was successful
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
-
-// orientation/motion vars
-Quaternion q;        // [w, x, y, z]         quaternion container
-VectorInt16 aa;      // [x, y, z]            accel sensor measurements
-VectorInt16 aaReal;  // [x, y, z]            gravity-free accel sensor measurements
-VectorInt16 aaWorld; // [x, y, z]            world-frame accel sensor measurements
-VectorFloat gravity; // [x, y, z]            gravity vector
-float euler[3];      // [psi, theta, phi]    Euler angle container
-float ypr[3];        // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
-
-// packet structure for InvenSense teapot demo
-uint8_t teapotPacket[14] = {'$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n'};
-
-//Change this 3 variables if you want to fine tune the skecth to your needs.
+//Change this 3 variables if you want to fine tune MPU precision
 int buffersize = 1000; //Amount of readings used to average, make it higher to get more precision but sketch will be slower  (default:1000)
 int acel_deadzone = 8; //Acelerometer error allowed, make it lower to get more precision, but sketch may not converge  (default:8)
 int giro_deadzone = 1; //Giro error allowed, make it lower to get more precision, but sketch may not converge  (default:1)
@@ -81,6 +42,8 @@ float last_gyro_z_angle;
 
 void set_last_read_angle_data(unsigned long time, float x, float y, float z, float x_gyro, float y_gyro, float z_gyro)
 {
+    if(isnan(x) || isnan(y) || isnan(z) || isnan(x_gyro) || isnan(y_gyro) || isnan(z_gyro)) return;
+
     last_read_time = time;
     last_x_angle = x;
     last_y_angle = y;
@@ -88,25 +51,6 @@ void set_last_read_angle_data(unsigned long time, float x, float y, float z, flo
     last_gyro_x_angle = x_gyro;
     last_gyro_y_angle = y_gyro;
     last_gyro_z_angle = z_gyro;
-}
-
-inline unsigned long get_last_time() { return last_read_time; }
-inline float get_last_x_angle() { return last_x_angle; }
-inline float get_last_y_angle() { return last_y_angle; }
-inline float get_last_z_angle() { return last_z_angle; }
-inline float get_last_gyro_x_angle() { return last_gyro_x_angle; }
-inline float get_last_gyro_y_angle() { return last_gyro_y_angle; }
-inline float get_last_gyro_z_angle() { return last_gyro_z_angle; }
-
-#pragma endregion
-
-/**
- * INTERRUPT DETECTION ROUTINE
- * */
-volatile bool mpuInterrupt = false; // indicates whether MPU interrupt pin has gone high
-void dmpDataReady()
-{
-    mpuInterrupt = true;
 }
 
 void setup()
@@ -133,7 +77,6 @@ void setup()
 
     setupMPU6050();
     setupSDCard();
-    pinMode(LED_PIN, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
 }
 
@@ -178,51 +121,10 @@ void setupMPU6050()
     // initialize device
     Serial.println(F("Initializing I2C devices..."));
     mpu.initialize();
-    pinMode(INTERRUPT_PIN, INPUT);
 
     // verify connection
     Serial.println(F("Testing device connections..."));
     Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
-
-    // load and configure the DMP
-    Serial.println(F("Initializing DMP..."));
-    devStatus = mpu.dmpInitialize();
-
-    // supply your own gyro offsets here, scaled for min sensitivity
-    mpu.setXGyroOffset(220);
-    mpu.setYGyroOffset(76);
-    mpu.setZGyroOffset(-85);
-    mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
-
-    // make sure it worked (returns 0 if so)
-    if (devStatus == 0)
-    {
-        // turn on the DMP, now that it's ready
-        Serial.println(F("Enabling DMP..."));
-        mpu.setDMPEnabled(true);
-
-        // enable Arduino interrupt detection
-        Serial.println(F("Enabling interrupt detection (Arduino external interrupt 0)..."));
-        attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
-        mpuIntStatus = mpu.getIntStatus();
-
-        // set our DMP Ready flag so the main loop() function knows it's okay to use it
-        Serial.println(F("DMP ready! Waiting for first interrupt..."));
-        dmpReady = true;
-
-        // get expected DMP packet size for later comparison
-        packetSize = mpu.dmpGetFIFOPacketSize();
-    }
-    else
-    {
-        // ERROR!
-        // 1 = initial memory load failed
-        // 2 = DMP configuration updates failed
-        // (if it's going to break, usually the code will be 1)
-        Serial.print(F("DMP Initialization failed (code "));
-        Serial.print(devStatus);
-        Serial.println(F(")"));
-    }
 
     setGyroscopeOffset();
 }
@@ -262,42 +164,18 @@ void setGyroscopeOffset()
     meansensors();
 
     Serial.println("Calculating offsets...");
+
     calibration();
+    meansensors();
 
     Serial.println("Offsets calculated");
 
-    meansensors();
-    Serial.print("Sensor readings with offsets:\t");
-    Serial.print(mean_ax);
-    Serial.print("\t");
-    Serial.print(mean_ay);
-    Serial.print("\t");
-    Serial.print(mean_az);
-    Serial.print("\t");
-    Serial.print(mean_gx);
-    Serial.print("\t");
-    Serial.print(mean_gy);
-    Serial.print("\t");
-    Serial.println(mean_gz);
-    Serial.print("Your offsets:\t");
-    Serial.print(ax_offset);
     mpu.setXAccelOffset(ax_offset);
-    Serial.print("\t");
-    Serial.print(ay_offset);
     mpu.setYAccelOffset(ay_offset);
-    Serial.print("\t");
-    Serial.print(az_offset);
     mpu.setZAccelOffset(az_offset);
-    Serial.print("\t");
-    Serial.print(gx_offset);
     mpu.setXGyroOffset(gx_offset);
-    Serial.print("\t");
-    Serial.print(gy_offset);
     mpu.setYGyroOffset(gy_offset);
-    Serial.print("\t");
-    Serial.println(gz_offset);
     mpu.setZGyroOffset(gz_offset);
-    Serial.println("Data is printed as: acelX acelY acelZ giroX giroY giroZ");
 
     playSound(500);
 }
@@ -330,7 +208,7 @@ void meansensors()
             mean_gz = buff_gz / buffersize;
         }
         i++;
-        delay(2); //Needed so we don't get repeated measures
+        delay(3); //Needed so we don't get repeated measures
     }
 }
 
@@ -346,7 +224,15 @@ void calibration()
     gx_offset = -mean_gx / 4;
     gy_offset = -mean_gy / 4;
     gz_offset = -mean_gz / 4;
+
     int ready = 0;
+    bool meanAxReady = false;
+    bool meanAyReady = false;
+    bool meanAzReady = false;
+    bool meanGxReady = false;
+    bool meanGyReady = false;
+    bool meanGzReady = false;
+
     while (ready < 6)
     {
         mpu.setXAccelOffset(ax_offset);
@@ -360,34 +246,88 @@ void calibration()
         meansensors();
 
         if (abs(mean_ax) <= acel_deadzone)
-            ready++;
+        {
+            if (!meanAxReady)
+            {
+                Serial.println("mean ax ready");
+                meanAxReady = true;
+                ready++;
+            }
+        }
         else
+        {
             ax_offset = ax_offset - mean_ax / acel_deadzone;
+        }
 
         if (abs(mean_ay) <= acel_deadzone)
-            ready++;
+        {
+            if (!meanAyReady)
+            {
+                Serial.println("mean ay ready");
+                meanAyReady = true;
+                ready++;
+            }
+        }
         else
+        {
             ay_offset = ay_offset - mean_ay / acel_deadzone;
+        }
 
         if (abs(16384 - mean_az) <= acel_deadzone)
-            ready++;
+        {
+            if (!meanAzReady)
+            {
+                Serial.println("mean az ready");
+                meanAzReady = true;
+                ready++;
+            }
+        }
         else
+        {
             az_offset = az_offset + (16384 - mean_az) / acel_deadzone;
+        }
 
         if (abs(mean_gx) <= giro_deadzone)
-            ready++;
+        {
+            if (!meanGxReady)
+            {
+                Serial.println("mean gx ready");
+                meanGxReady = true;
+                ready++;
+            }
+        }
         else
+        {
             gx_offset = gx_offset - mean_gx / (giro_deadzone + 1);
+        }
 
         if (abs(mean_gy) <= giro_deadzone)
-            ready++;
+        {
+            if (!meanGyReady)
+            {
+                Serial.println("mean gy ready");
+                meanGyReady = true;
+                ready++;
+            }
+        }
         else
+        {
             gy_offset = gy_offset - mean_gy / (giro_deadzone + 1);
+        }
 
         if (abs(mean_gz) <= giro_deadzone)
-            ready++;
+        {
+            if (!meanGzReady)
+            {
+                Serial.println("mean gz ready");
+                meanGzReady = true;
+                ready++;
+            }
+        }
         else
+        {
             gz_offset = gz_offset - mean_gz / (giro_deadzone + 1);
+        }
     }
 }
 
@@ -403,35 +343,31 @@ void loop()
 
     // Convert gyro values to degrees/sec
     float FS_SEL = 131;
-
     float gyro_x = gx / FS_SEL;
     float gyro_y = gy / FS_SEL;
     float gyro_z = gz / FS_SEL;
 
     // Get raw acceleration values
-    //float G_CONVERT = 16384;
     float accel_x = ax;
     float accel_y = ay;
     float accel_z = az;
 
     // Get angle values from accelerometer
     float RADIANS_TO_DEGREES = 180 / 3.14159;
-    // float accel_vector_length = sqrt(pow(accel_x,2) + pow(accel_y,2) + pow(accel_z,2));
     float accel_angle_y = atan(-1 * accel_x / sqrt(pow(accel_y, 2) + pow(accel_z, 2))) * RADIANS_TO_DEGREES;
     float accel_angle_x = atan(accel_y / sqrt(pow(accel_x, 2) + pow(accel_z, 2))) * RADIANS_TO_DEGREES;
-
     float accel_angle_z = 0;
 
     // Compute the (filtered) gyro angles
-    float dt = (t_now - get_last_time()) / 1000.0;
-    float gyro_angle_x = gyro_x * dt + get_last_x_angle();
-    float gyro_angle_y = gyro_y * dt + get_last_y_angle();
-    float gyro_angle_z = gyro_z * dt + get_last_z_angle();
+    float dt = (t_now - last_read_time) / 1000.0;
+    float gyro_angle_x = gyro_x * dt + last_x_angle;
+    float gyro_angle_y = gyro_y * dt + last_y_angle;
+    float gyro_angle_z = gyro_z * dt + last_z_angle;
 
     // Compute the drifting gyro angles
-    float unfiltered_gyro_angle_x = gyro_x * dt + get_last_gyro_x_angle();
-    float unfiltered_gyro_angle_y = gyro_y * dt + get_last_gyro_y_angle();
-    float unfiltered_gyro_angle_z = gyro_z * dt + get_last_gyro_z_angle();
+    float unfiltered_gyro_angle_x = gyro_x * dt + last_gyro_x_angle;
+    float unfiltered_gyro_angle_y = gyro_y * dt + last_gyro_y_angle;
+    float unfiltered_gyro_angle_z = gyro_z * dt + last_gyro_z_angle;
 
     // Apply the complementary filter to figure out the change in angle - choice of alpha is
     // estimated now.  Alpha depends on the sampling rate...
@@ -484,5 +420,5 @@ void loop()
     }
 
     // Delay so we don't swamp the serial port
-    delay(5);
+    delay(20);
 }
