@@ -10,9 +10,11 @@
 #include "Wire.h"
 #endif
 
+#define BUTTON_PIN 7
 #define BUZZER_PIN 9 // use pin 9 on Arduino Uno for buzzer
 #define CS_PIN 4     // use pin 12 as CS pin for SDCard
 
+int pauseTimeSeconds = 5;
 int maxDeviation = 10; // when deviation bigger then X sound alarm
 bool isAlarmOn = false;
 
@@ -42,7 +44,8 @@ float last_gyro_z_angle;
 
 void set_last_read_angle_data(unsigned long time, float x, float y, float z, float x_gyro, float y_gyro, float z_gyro)
 {
-    if(isnan(x) || isnan(y) || isnan(z) || isnan(x_gyro) || isnan(y_gyro) || isnan(z_gyro)) return;
+    if (isnan(x) || isnan(y) || isnan(z) || isnan(x_gyro) || isnan(y_gyro) || isnan(z_gyro))
+        return;
 
     last_read_time = time;
     last_x_angle = x;
@@ -78,6 +81,7 @@ void setup()
     setupMPU6050();
     setupSDCard();
     pinMode(BUZZER_PIN, OUTPUT);
+    pinMode(BUTTON_PIN, INPUT);
 }
 
 void setupSDCard()
@@ -336,8 +340,27 @@ void calibration()
     }
 }
 
+void pauseIfButtonIsPressed()
+{
+    if (digitalRead(BUTTON_PIN) == HIGH)
+    {
+        bool wasAlarmOn = isAlarmOn;
+        if (isAlarmOn)
+        {
+            alarm(false);
+        }
+        delay(pauseTimeSeconds * 1000);
+        if (wasAlarmOn)
+        {
+            alarm(true);
+        }
+    }
+}
+
 void loop()
 {
+    pauseIfButtonIsPressed();
+
     double dT;
 
     // Read the raw values.
