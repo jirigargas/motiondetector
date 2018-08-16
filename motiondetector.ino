@@ -105,6 +105,8 @@ void writeToLog(String datePart, String timePart, float x, float y, float z)
         logFile.print(" ");
         logFile.print(timePart);
         logFile.print(",");
+        logFile.print(x);
+        logFile.print(",");
         logFile.print(y);
         logFile.print(",");
         logFile.println(z);
@@ -349,6 +351,10 @@ void pauseIfButtonIsPressed()
         {
             alarm(false);
         }
+        
+        logFile = SD.open("log.txt", FILE_WRITE);
+        logFile.println("pause");
+
         delay(pauseTimeSeconds * 1000);
         if (wasAlarmOn)
         {
