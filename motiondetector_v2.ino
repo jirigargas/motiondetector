@@ -1,41 +1,105 @@
-#include "Wire.h"
+#include "Wire.h"       // i2c bus
+#include "I2Cdev.h"     // i2c bus
+#include "DS3231.h"     // clock
+#include "SPI.h"        // sd card
+#include "SD.h"         // sd card
+#include "U8glib.h"     // display
 
-const int MPU_addr = 0x68;
+#define MPU_ADDR 0x68 // i2c address of MPU
+#define BUTTON_PIN 7    // use pin 7 on Arduino Uno for pause button
+#define BUZZER_PIN 9    // use pin 9 on Arduino Uno for buzzer
+#define CS_PIN 4        // use pin 12 on Arduino UNO as CS pin for SDCard
+
 short accXRaw, accYRaw, accZRaw, tmpRaw, gyroXRaw, gyroYRaw, gyroZRaw;
 unsigned long lastReadTime;
 float lastXAngle, lastYAngle;
 float xOffset, yOffset;
+
+int pauseTimeSeconds = 5; // stop loop for N seconds if button is pressed
+int maxDeviation = 10;    // sound alarm if deviation is bigger then X 
+bool isAlarmOn = false;
+
+DS3231 rtc(SDA, SCL);                             // clock
+U8GLIB_SSD1306_128X64 screen(U8G_I2C_OPT_NO_ACK); // display
+File logFile;
 
 void setup()
 {
   Serial.begin(9600);
   Wire.begin();
 
+  SetupRtc();
+  SetupScreen();
+  SetupSDCard();
   SetupMpu6050();
+  SetupBuzzer();
+  SetupButton();
+
+  WriteCalibrationToScreen();
   CalibrateMpu6050Offset();
   WriteOffsetToSerial();
 }
 
 void loop()
 {
+  PauseIfButtonIsPressed();
+
   ReadRawMpuValues();
   ComputeFilteredValues();
   WriteFilteredValuesWithOffsetToSerial();
+  WriteDataToLogFile();
+
+  CheckIfPositionIsOk();
 
   delay(50);
 }
 
+#pragma region Setup
+
 void SetupMpu6050()
 {
-  Wire.beginTransmission(MPU_addr);
+  Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x6B);  // PWR_MGMT_1 register
   Wire.write(0);     // set to zero (wakes up the MPU-6050)
   Wire.endTransmission(true);
 }
 
+void SetupRtc()
+{
+  rtc.begin();
+}
+
+void SetupScreen()
+{
+    screen.setFont(u8g_font_unifont);
+    screen.setColorIndex(1); // Instructs the display to draw with a pixel on.
+}
+
+void SetupSDCard()
+{
+  if (SD.begin(CS_PIN))
+  {
+    Serial.println(F("SD card is ready"));
+  }
+  else
+  {
+    Serial.println(F("Unable to connect SD card"));
+  }
+}
+
+void SetupBuzzer()
+{
+  pinMode(BUZZER_PIN, OUTPUT);
+}
+
+void SetupButton()
+{
+  pinMode(BUTTON_PIN, INPUT);
+}
+
 void CalibrateMpu6050Offset()
 {
-  for (int i = 0; i < 500; i++)
+  for (int i = 0; i < 50; i++)
   {
     ReadRawMpuValues();
     ComputeFilteredValues();
@@ -46,12 +110,60 @@ void CalibrateMpu6050Offset()
   yOffset = lastYAngle;
 }
 
+#pragma endregion
+
+#pragma region Write to Serial or Screen
+
+void WriteFilteredValuesWithOffsetToSerial()
+{
+  Serial.print(F("X = "));    Serial.print(lastXAngle - xOffset);
+  Serial.print(F(" | Y = ")); Serial.println(lastYAngle - yOffset);
+}
+
+void WriteOffsetToSerial()
+{
+  Serial.print(F("Offset "));
+  Serial.print(F("X = "));    Serial.print(xOffset);
+  Serial.print(F(" | Y = ")); Serial.println(yOffset);
+}
+
+void WriteCalibrationToScreen()
+{
+  screen.firstPage();
+  do
+  {
+    screen.drawStr(10, 30, F("Calibration"));
+  } while (screen.nextPage());
+}
+
+void WriteErrorToScreen()
+{
+  screen.firstPage();
+  do
+  {
+    screen.drawStr(0, 10, rtc.getTimeStr());
+    screen.drawStr(10, 30, F("ERROR"));
+  } while (screen.nextPage());
+}
+
+void WritePositionOkToScreen()
+{
+  screen.firstPage();
+  do
+  {
+    screen.drawStr(0, 10, rtc.getTimeStr());
+    screen.drawStr(10, 30, F("Position OK"));
+  } while (screen.nextPage());
+}
+
+#pragma endregion
+
 void ReadRawMpuValues()
 {
-  Wire.beginTransmission(MPU_addr);
+  Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x3B);  // starting with register 0x3B (ACCEL_XOUT_H)
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU_addr, 14, true);  // request a total of 14 registers
+  Wire.requestFrom(MPU_ADDR, 14, true);  // request a total of 14 registers
 
   accXRaw  = Wire.read() << 8 | Wire.read();  // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)    
   accYRaw  = Wire.read() << 8 | Wire.read();  // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
@@ -62,22 +174,8 @@ void ReadRawMpuValues()
   gyroZRaw = Wire.read() << 8 | Wire.read();  // 0x47 (GYRO_ZOUT_H)  & 0x48 (GYRO_ZOUT_L)
 }
 
-void WriteFilteredValuesWithOffsetToSerial()
-{
-  Serial.print("X = ");    Serial.print(lastXAngle - xOffset);
-  Serial.print(" | Y = "); Serial.println(lastYAngle - yOffset);
-}
-
-void WriteOffsetToSerial()
-{
-  Serial.print("Offset ");
-  Serial.print("X = ");    Serial.print(xOffset);
-  Serial.print(" | Y = "); Serial.println(yOffset);
-}
-
 void ComputeFilteredValues()
-{
- 
+{ 
   // Get the time of reading for rotation computations
   unsigned long t_now = millis();
 
@@ -109,4 +207,70 @@ void ComputeFilteredValues()
     lastXAngle = angle_x;
     lastYAngle = angle_y;
   }  
+}
+
+void WriteDataToLogFile()
+{
+  logFile = SD.open("log.txt", FILE_WRITE);
+  if (logFile)
+  {
+    logFile.print(rtc.getDateStr()); logFile.print(F(" "));
+    logFile.print(rtc.getTimeStr()); logFile.print(F(","));
+    logFile.print(lastXAngle); logFile.print(F(","));
+    logFile.println(lastXAngle);
+  
+    logFile.close();
+  }
+}
+
+void WritePauseToLogFile()
+{
+  logFile = SD.open("log.txt", FILE_WRITE);
+  if(logFile)
+  {
+    logFile.println(F("pause"));
+    logFile.close();
+  }  
+}
+
+void PauseIfButtonIsPressed()
+{
+  if (digitalRead(BUTTON_PIN) == HIGH)
+  {
+    //Serial.println("pause");
+    bool wasAlarmOn = isAlarmOn;
+    if (isAlarmOn) { ToggleAlarm(false); }
+
+    WritePauseToLogFile();
+
+    delay(pauseTimeSeconds * 1000);
+    if (wasAlarmOn) { ToggleAlarm(true); }
+  }
+}
+
+void ToggleAlarm(bool raiseAlarm)
+{
+    isAlarmOn = raiseAlarm;
+    if (raiseAlarm)
+    {
+        tone(BUZZER_PIN, 2500);
+    }
+    else
+    {
+        noTone(BUZZER_PIN);
+    }
+}
+
+void CheckIfPositionIsOk()
+{
+  if ((abs(lastXAngle - xOffset) > maxDeviation || abs(lastYAngle - yOffset) > maxDeviation))
+    {
+        WriteErrorToScreen();
+        if (!isAlarmOn) { ToggleAlarm(true); }
+    }
+    else
+    {
+      WritePositionOkToScreen();
+      if (isAlarmOn) { ToggleAlarm(false); }
+    }
 }
