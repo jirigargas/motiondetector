@@ -5,7 +5,7 @@
 #include "SD.h"         // sd card
 #include "U8glib.h"     // display
 
-#define MPU_ADDR 0x68 // i2c address of MPU
+#define MPU_ADDR 0x69   // i2c address of MPU
 #define BUTTON_PIN 7    // use pin 7 on Arduino Uno for pause button
 #define BUZZER_PIN 9    // use pin 9 on Arduino Uno for buzzer
 #define CS_PIN 4        // use pin 12 on Arduino UNO as CS pin for SDCard
@@ -26,7 +26,7 @@ File logFile;
 void setup()
 {
   Serial.begin(9600);
-  Wire.begin();
+  Wire.begin(); // join I2C bus
 
   SetupRtc();
   SetupScreen();
@@ -71,8 +71,8 @@ void SetupRtc()
 
 void SetupScreen()
 {
-    screen.setFont(u8g_font_unifont);
-    screen.setColorIndex(1); // Instructs the display to draw with a pixel on.
+  screen.setFont(u8g_font_unifont);
+  screen.setColorIndex(1); // Instructs the display to draw with a pixel on.
 }
 
 void SetupSDCard()
@@ -99,7 +99,7 @@ void SetupButton()
 
 void CalibrateMpu6050Offset()
 {
-  for (int i = 0; i < 50; i++)
+  for (int i = 0; i < 200; i++)
   {
     ReadRawMpuValues();
     ComputeFilteredValues();
@@ -116,14 +116,14 @@ void CalibrateMpu6050Offset()
 
 void WriteFilteredValuesWithOffsetToSerial()
 {
-  Serial.print(F("X = "));    Serial.print(lastXAngle - xOffset);
+  Serial.print(F(" | X = ")); Serial.print(lastXAngle - xOffset);
   Serial.print(F(" | Y = ")); Serial.println(lastYAngle - yOffset);
 }
 
 void WriteOffsetToSerial()
 {
   Serial.print(F("Offset "));
-  Serial.print(F("X = "));    Serial.print(xOffset);
+  Serial.print(F(" | X = ")); Serial.print(xOffset);
   Serial.print(F(" | Y = ")); Serial.println(yOffset);
 }
 
@@ -217,7 +217,7 @@ void WriteDataToLogFile()
     logFile.print(rtc.getDateStr()); logFile.print(F(" "));
     logFile.print(rtc.getTimeStr()); logFile.print(F(","));
     logFile.print(lastXAngle); logFile.print(F(","));
-    logFile.println(lastXAngle);
+    logFile.println(lastYAngle);
   
     logFile.close();
   }
@@ -250,27 +250,27 @@ void PauseIfButtonIsPressed()
 
 void ToggleAlarm(bool raiseAlarm)
 {
-    isAlarmOn = raiseAlarm;
-    if (raiseAlarm)
-    {
-        tone(BUZZER_PIN, 2500);
-    }
-    else
-    {
-        noTone(BUZZER_PIN);
-    }
+  isAlarmOn = raiseAlarm;
+  if (raiseAlarm)
+  {
+    tone(BUZZER_PIN, 2500);
+  }
+  else
+  {
+    noTone(BUZZER_PIN);
+  }
 }
 
 void CheckIfPositionIsOk()
 {
   if ((abs(lastXAngle - xOffset) > maxDeviation || abs(lastYAngle - yOffset) > maxDeviation))
-    {
-        WriteErrorToScreen();
-        if (!isAlarmOn) { ToggleAlarm(true); }
-    }
-    else
-    {
-      WritePositionOkToScreen();
-      if (isAlarmOn) { ToggleAlarm(false); }
-    }
+  {
+    WriteErrorToScreen();
+    if (!isAlarmOn) { ToggleAlarm(true); }
+  }
+  else
+  {
+    WritePositionOkToScreen();
+    if (isAlarmOn) { ToggleAlarm(false); }
+  }
 }
